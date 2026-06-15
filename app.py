@@ -172,6 +172,11 @@ def fetch_suggestions(query: str) -> list[str]:
     if len(query) < 4:
         return []
 
+    # Strip unit/apartment prefix so "4/40 Rothesay" → "40 Rothesay" for better geocoding
+    clean_query = re.sub(r"^\d+\s*/\s*", "", query.strip())
+    clean_query = re.sub(r"^(unit|apt|apartment|flat|shop)\s+\S+\s*,?\s*", "", clean_query, flags=re.IGNORECASE)
+    query = clean_query or query
+
     # ── Try Nominatim first ────────────────────────────────────────────────────
     try:
         resp = requests.get(
@@ -279,6 +284,49 @@ final_address = st.session_state.confirmed_address or typed
 if st.session_state.confirmed_address:
     st.success(f"✅ Selected: {st.session_state.confirmed_address}")
 
+# ── Address parsing ────────────────────────────────────────────────────────────
+def parse_address(address: str) -> dict:
+    """
+    Handles formats like:
+      4/40 Rothesay Avenue, Elwood VIC 3186
+      Unit 4, 40 Rothesay Avenue, Elwood VIC 3186
+      42 Collins Street, Melbourne VIC 3000
+    Returns suburb, state, postcode, suburb_state
+    """
+    addr = re.sub(r"\s+", " ", address.strip())
+    parts = [p.strip() for p in addr.split(",")]
+    if parts and parts[-1].lower() in ("australia", "au"):
+        parts = parts[:-1]
+
+    suburb_part = parts[-1] if parts else ""
+
+    postcode_m = re.search(r"\b(\d{4})\b", suburb_part)
+    postcode = postcode_m.group(1) if postcode_m else ""
+
+    state_m = re.search(r"\b(VIC|NSW|QLD|SA|WA|TAS|ACT|NT)\b", suburb_part, re.IGNORECASE)
+    state = state_m.group(1).upper() if state_m else ""
+
+    suburb_clean = suburb_part
+    if postcode:
+        suburb_clean = suburb_clean.replace(postcode, "")
+    if state:
+        suburb_clean = re.sub(r"\b" + state + r"\b", "", suburb_clean, flags=re.IGNORECASE)
+    suburb_clean = suburb_clean.strip(", ").strip()
+
+    suburb_state = suburb_clean
+    if state:
+        suburb_state += f" {state}"
+    if postcode:
+        suburb_state += f" {postcode}"
+
+    return {
+        "suburb": suburb_clean,
+        "state": state,
+        "postcode": postcode,
+        "suburb_state": suburb_state.strip(),
+    }
+
+
 # ── Property data scraping ─────────────────────────────────────────────────────
 SCRAPE_HEADERS = {
     "User-Agent": (
@@ -291,20 +339,24 @@ SCRAPE_HEADERS = {
 
 
 def format_domain_search_url(address: str) -> str:
-    return f"https://www.domain.com.au/sale/?q={urllib.parse.quote_plus(address)}"
+    p = parse_address(address)
+    q = p["suburb_state"] or address
+    return f"https://www.domain.com.au/sold-listings/?q={urllib.parse.quote_plus(q)}&sort=dateSold-desc"
 
 
 def get_proptrack_url(address: str) -> str:
-    parts = address.split(",")
-    street = parts[0].strip().lower().replace(" ", "-") if parts else ""
-    suburb = parts[1].strip().lower().replace(" ", "-") if len(parts) > 1 else ""
-    return f"https://www.realestate.com.au/property/{street}-{suburb}/"
+    p = parse_address(address)
+    suburb_slug = p["suburb"].lower().replace(" ", "-")
+    state_slug = p["state"].lower()
+    postcode = p["postcode"]
+    # REA property profile URL format
+    return f"https://www.realestate.com.au/neighbourhoods/{suburb_slug}-{state_slug}-{postcode}/"
 
 
 def search_domain_sold(address: str):
     try:
-        parts = address.split(",")
-        suburb_state = ",".join(parts[1:]).strip() if len(parts) > 1 else address
+        p = parse_address(address)
+        suburb_state = p["suburb_state"] or address
         url = (
             f"https://www.domain.com.au/sold-listings/"
             f"?q={urllib.parse.quote_plus(suburb_state)}&sort=dateSold-desc"
@@ -312,15 +364,17 @@ def search_domain_sold(address: str):
         resp = requests.get(url, headers=SCRAPE_HEADERS, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
         prices = []
-        for p in soup.find_all("p", {"data-testid": "listing-card-price"})[:6]:
-            m = re.search(r"\$([\d,]+)", p.text)
+        for tag in soup.find_all("p", {"data-testid": "listing-card-price"})[:8]:
+            m = re.search(r"\$([\d,]+)", tag.text)
             if m:
-                prices.append(int(m.group(1).replace(",", "")))
+                val = int(m.group(1).replace(",", ""))
+                if val > 50_000:
+                    prices.append(val)
         if prices:
             avg = sum(prices) // len(prices)
             return {
                 "value": f"${avg:,}",
-                "range": f"Based on {len(prices)} recent sales in area: ${min(prices):,} – ${max(prices):,}",
+                "range": f"Based on {len(prices)} recent sales in {p['suburb'] or 'area'}: ${min(prices):,} – ${max(prices):,}",
                 "url": url,
                 "source": "Domain (recent sales)",
             }
@@ -331,10 +385,13 @@ def search_domain_sold(address: str):
 
 def search_rea_sold(address: str):
     try:
-        parts = address.split(",")
-        suburb_state = parts[1].strip() if len(parts) > 1 else address
-        slug = suburb_state.strip().lower().replace(" ", "-").replace(",", "")
-        url = f"https://www.realestate.com.au/sold/in-{slug}/?sortType=soldDate"
+        p = parse_address(address)
+        suburb = p["suburb"].lower().replace(" ", "-")
+        state = p["state"].lower()
+        postcode = p["postcode"]
+        # REA sold URL: /sold/in-elwood-vic-3184/
+        location_slug = "-".join(filter(None, [suburb, state, postcode]))
+        url = f"https://www.realestate.com.au/sold/in-{location_slug}/?sortType=soldDate"
         resp = requests.get(url, headers=SCRAPE_HEADERS, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
         prices = []
@@ -348,7 +405,7 @@ def search_rea_sold(address: str):
             avg = sum(prices) // len(prices)
             return {
                 "value": f"${avg:,}",
-                "range": f"Based on {len(prices)} recent sales in area: ${min(prices):,} – ${max(prices):,}",
+                "range": f"Based on {len(prices)} recent sales in {p['suburb'] or 'area'}: ${min(prices):,} – ${max(prices):,}",
                 "url": url,
                 "source": "realestate.com.au (recent sales)",
             }
