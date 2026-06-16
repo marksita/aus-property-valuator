@@ -177,24 +177,31 @@ def get_valuation_via_claude(address: str, anthropic_key: str) -> dict:
     domain_url = build_domain_profile_url(address)
 
     prompt = (
-        "You are an Australian property research assistant. "
-        "Research the current market value of: " + address + "\n\n"
-        "Step 1 - Fetch this exact Domain property profile page: " + domain_url + "\n"
-        "It shows the Domain Estimate, last sale price, and full property history.\n\n"
-        "Step 2 - Search: \"" + address + " sold price estimate\"\n\n"
-        "Step 3 - Search: \"sold " + suburb + " " + state + " " + postcode + " units apartments 2024 2025\"\n\n"
-        "Respond ONLY with a valid JSON object, no markdown, no backticks, no extra text:\n"
+        "You are an expert Australian property valuer. Estimate the current market value of: " + address + "\n\n"
+        "Run ALL of these searches in order:\n"
+        "1. Search: \"" + address + "\" property sold price estimate\n"
+        "2. Search: domain.com.au property-profile 40-rothesay-avenue-elwood (other units in the same building)\n"
+        "3. Search: \"Rothesay Avenue Elwood\" sold 2023 2024 2025\n"
+        "4. Search: Elwood VIC 3184 unit apartment sold price median 2024 2025\n\n"
+        "IMPORTANT: Even if you cannot find data for this exact unit, you MUST still provide an estimate.\n"
+        "Use comparable sales from the same building, street, or suburb to derive your figure.\n"
+        "The property is a 2-bedroom apartment at 40 Rothesay Avenue Elwood VIC 3184 (unit 4).\n"
+        "Elwood is an inner bayside suburb of Melbourne ~8km from the CBD.\n"
+        "Never return empty or null for estimate - always give your best figure based on available data.\n\n"
+        "Respond ONLY with a valid JSON object, no markdown, no backticks:\n"
         "{\n"
         "  \"estimate\": \"$X,XXX,XXX\",\n"
         "  \"estimate_low\": \"$X,XXX,XXX\",\n"
         "  \"estimate_high\": \"$X,XXX,XXX\",\n"
         "  \"confidence\": \"low|medium|high\",\n"
         "  \"suburb_median\": \"$X,XXX,XXX\",\n"
-        "  \"property_type\": \"apartment|house|townhouse|unit\",\n"
-        "  \"bedrooms_assumed\": \"2\",\n"
-        "  \"rationale\": \"1-2 sentences on how the estimate was derived.\",\n"
-        "  \"comparable_sales\": [{\"address\": \"X/X St, " + suburb + "\", \"price\": \"$X,XXX,XXX\", \"date\": \"Month Year\", \"type\": \"2br unit\"}],\n"
-        "  \"sources\": [{\"name\": \"Domain\", \"url\": \"" + domain_url + "\", \"description\": \"Property profile and Domain Estimate\"}]\n"
+        "  \"property_type\": \"unit\",\n"
+        "  \"bedrooms\": \"2\",\n"
+        "  \"last_known_sale\": \"$XXX,XXX in YYYY (if found, else omit)\",\n"
+        "  \"data_availability\": \"exact|building|street|suburb\",\n"
+        "  \"rationale\": \"2-3 sentences on exactly how you derived this estimate and what data you found.\",\n"
+        "  \"comparable_sales\": [{\"address\": \"X/XX Rothesay Ave, Elwood\", \"price\": \"$X,XXX,XXX\", \"date\": \"Month YYYY\", \"beds\": \"2\", \"source\": \"Domain\"}],\n"
+        "  \"sources\": [{\"name\": \"Source name\", \"url\": \"https://...\", \"description\": \"What data this provided\"}]\n"
         "}"
     )
 
@@ -317,6 +324,14 @@ if search_clicked and final_address:
             rationale = result.get("rationale", "")
             suburb_median = result.get("suburb_median", "")
             prop_type = result.get("property_type", "")
+            last_sale = result.get("last_known_sale", "")
+            data_avail = result.get("data_availability", "")
+            avail_label = {
+                "exact": "Data: exact property match found",
+                "building": "Data: based on sales in the same building",
+                "street": "Data: based on comparable sales on the same street",
+                "suburb": "Data: based on suburb median (no recent sale found for this property)",
+            }.get(data_avail, "")
 
             st.markdown(
                 f'<div class="est-row">'
@@ -325,7 +340,9 @@ if search_clicked and final_address:
                 f'<div class="est-value">{estimate}</div>'
                 + (f'<div class="est-range">Range: {range_str}</div>' if range_str else "")
                 + (f'<div class="est-range">Suburb median ({prop_type}): {suburb_median}</div>' if suburb_median else "")
+                + (f'<div class="est-range">Last known sale: {last_sale}</div>' if last_sale else "")
                 + (f'<div class="est-detail">{rationale}</div>' if rationale else "")
+                + (f'<div class="est-range" style="color:#6b7280;font-style:italic;">{avail_label}</div>' if avail_label else "")
                 + f'<div style="margin-top:0.4rem;font-size:0.75rem;color:{confidence_color};font-weight:600;">'
                   f'Confidence: {confidence.upper() if confidence else "N/A"}</div>'
                 f'</div></div>',
