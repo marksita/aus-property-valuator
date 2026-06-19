@@ -1,60 +1,68 @@
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
-import re
-import time
 import urllib.parse
-from datetime import datetime
+import re
 
 st.set_page_config(page_title="AUS Property Valuator", page_icon="🏠", layout="centered", initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
   html,body,[class*="css"]{font-family:'Inter',sans-serif;}
   #MainMenu,footer,header{visibility:hidden;}
-  .block-container{padding:2rem 1rem 4rem;max-width:780px;}
-  .hero{text-align:center;padding:3rem 0 2rem;border-bottom:1px solid #e5e7eb;margin-bottom:2rem;}
-  .hero-tag{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:#6b7280;margin-bottom:.75rem;}
-  .hero-title{font-family:'DM Serif Display',serif;font-size:clamp(2rem,5vw,3.2rem);color:#0f172a;line-height:1.15;margin:0 0 .5rem;}
-  .hero-title em{font-style:italic;color:#1d4ed8;}
-  .hero-sub{color:#6b7280;font-size:.95rem;}
-  .section-head{font-size:.75rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#6b7280;margin:1.6rem 0 .6rem;}
-  .est-row{display:flex;align-items:flex-start;gap:1.2rem;margin-bottom:.9rem;padding:.9rem 1rem;background:#f9fafb;border-radius:10px;border-left:3px solid #1d4ed8;}
-  .est-logo{font-size:.65rem;font-weight:700;letter-spacing:.08em;color:#1d4ed8;text-transform:uppercase;min-width:80px;padding-top:.15rem;line-height:1.4;}
-  .est-body{flex:1;}
-  .est-value{font-family:'JetBrains Mono',monospace;font-size:1.25rem;font-weight:500;color:#111827;}
-  .est-range{font-size:.78rem;color:#6b7280;margin-top:.1rem;}
-  .est-note{font-size:.78rem;color:#374151;margin-top:.25rem;line-height:1.5;}
-  .est-link{display:inline-block;margin-top:.35rem;font-size:.75rem;color:#1d4ed8;text-decoration:none;}
-  .est-link:hover{text-decoration:underline;}
-  .comp-item{font-size:.78rem;color:#374151;margin-top:.2rem;padding:.25rem 0;}
-  .val-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:2rem;margin-top:1.5rem;box-shadow:0 4px 24px rgba(0,0,0,.06);}
-  .val-address{font-size:.85rem;color:#6b7280;margin-bottom:.4rem;}
-  .val-headline{font-family:'DM Serif Display',serif;font-size:1.5rem;color:#0f172a;margin-bottom:1.2rem;border-bottom:1px solid #f3f4f6;padding-bottom:.9rem;}
-  .disclaimer{font-size:.72rem;color:#9ca3af;margin-top:1.4rem;line-height:1.6;border-top:1px solid #f3f4f6;padding-top:.9rem;}
-  .footer{text-align:center;font-size:.72rem;color:#d1d5db;margin-top:3rem;}
-  div[data-testid="stButton"] button[kind="secondary"]{background:#f9fafb!important;border:1px solid #e5e7eb!important;border-radius:8px!important;text-align:left!important;font-size:.88rem!important;color:#111827!important;padding:.55rem .9rem!important;margin-bottom:4px!important;}
-  div[data-testid="stButton"] button[kind="secondary"]:hover{background:#eff6ff!important;border-color:#1d4ed8!important;color:#1d4ed8!important;}
+  .block-container{padding:2rem 1.5rem 5rem;max-width:800px;}
+
+  .hero{text-align:center;padding:3.5rem 0 2.5rem;margin-bottom:2rem;}
+  .hero-tag{font-size:.7rem;letter-spacing:.2em;text-transform:uppercase;color:#94a3b8;margin-bottom:1rem;font-weight:600;}
+  .hero-title{font-family:'DM Serif Display',serif;font-size:clamp(2.2rem,5vw,3.5rem);color:#0f172a;line-height:1.1;margin:0 0 .75rem;}
+  .hero-title em{font-style:italic;color:#2563eb;}
+  .hero-sub{color:#64748b;font-size:1rem;max-width:480px;margin:0 auto;line-height:1.6;}
+
+  .address-card{background:#fff;border:2px solid #e2e8f0;border-radius:16px;padding:2rem;margin-bottom:1.5rem;box-shadow:0 2px 12px rgba(0,0,0,.04);}
+  .address-display{font-family:'DM Serif Display',serif;font-size:1.4rem;color:#0f172a;margin:0 0 .25rem;}
+  .address-sub{font-size:.82rem;color:#94a3b8;margin:0;}
+
+  .section-title{font-size:.68rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#94a3b8;margin:2rem 0 .75rem;display:flex;align-items:center;gap:.5rem;}
+  .section-title::after{content:'';flex:1;height:1px;background:#f1f5f9;}
+
+  .link-grid{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.75rem;}
+  .link-grid.single{grid-template-columns:1fr;}
+
+  .link-card{display:block;background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:1.1rem 1.2rem;text-decoration:none;transition:all .15s ease;position:relative;overflow:hidden;}
+  .link-card:hover{border-color:#2563eb;box-shadow:0 4px 16px rgba(37,99,235,.1);transform:translateY(-1px);}
+  .link-card::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:#2563eb;opacity:0;}
+  .link-card:hover::before{opacity:1;}
+  .link-card-logo{font-size:.62rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#2563eb;margin-bottom:.35rem;}
+  .link-card-title{font-size:.9rem;font-weight:600;color:#0f172a;margin-bottom:.2rem;line-height:1.3;}
+  .link-card-desc{font-size:.75rem;color:#64748b;line-height:1.4;}
+  .link-card-arrow{position:absolute;top:1rem;right:1rem;font-size:.8rem;color:#cbd5e1;}
+  .link-card:hover .link-card-arrow{color:#2563eb;}
+
+  .link-card.featured{background:linear-gradient(135deg,#eff6ff 0%,#fff 100%);border-color:#bfdbfe;}
+  .link-card.featured .link-card-logo{color:#1d4ed8;}
+
+  .info-box{background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;padding:1.1rem 1.3rem;margin-bottom:1rem;font-size:.82rem;color:#475569;line-height:1.6;}
+  .info-box strong{color:#0f172a;}
+
+  .footer{text-align:center;font-size:.72rem;color:#cbd5e1;margin-top:4rem;letter-spacing:.04em;}
+
+  div[data-testid="stButton"] button[kind="secondary"]{background:#f8fafc!important;border:1.5px solid #e2e8f0!important;border-radius:10px!important;text-align:left!important;font-size:.85rem!important;color:#0f172a!important;padding:.6rem 1rem!important;margin-bottom:5px!important;transition:all .15s!important;}
+  div[data-testid="stButton"] button[kind="secondary"]:hover{background:#eff6ff!important;border-color:#2563eb!important;color:#1d4ed8!important;}
+
+  @media(max-width:600px){.link-grid{grid-template-columns:1fr;}}
 </style>
 """, unsafe_allow_html=True)
 
+# ── Hero ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero">
-  <div class="hero-tag">Australian Property</div>
-  <h1 class="hero-title">What's your home <em>worth?</em></h1>
-  <p class="hero-sub">Free market estimate for any Australian address — no account or API key needed.</p>
+  <div class="hero-tag">Australian Property Research</div>
+  <h1 class="hero-title">What's your property<br/><em>worth?</em></h1>
+  <p class="hero-sub">Enter any Australian address to instantly open the right page on every major property platform.</p>
 </div>
 """, unsafe_allow_html=True)
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
-    "Accept-Language": "en-AU,en;q=0.9",
-}
-
-# ── Address parsing ────────────────────────────────────────────────────────────
-def parse_address(address):
+# ── Address helpers ────────────────────────────────────────────────────────────
+def parse_address(address: str) -> dict:
     addr = re.sub(r"\s+", " ", address.strip())
     parts = [p.strip() for p in addr.split(",")]
     if parts and parts[-1].lower() in ("australia", "au"):
@@ -83,122 +91,96 @@ def parse_address(address):
         "suburb": suburb, "state": state, "postcode": postcode,
         "unit": unit, "street_num": street_num, "street_name": street_name,
         "suburb_state": f"{suburb} {state} {postcode}".strip(),
+        "full": address.strip(),
     }
 
-def domain_unit_slug(unit, street_num, street_name, suburb, state, postcode):
-    """Build Domain property-profile slug for a specific unit."""
-    sn = street_name.lower().replace(" ", "-")
-    sub = suburb.lower().replace(" ", "-")
-    return f"{unit}-{street_num}-{sn}-{sub}-{state.lower()}-{postcode}"
 
-def domain_building_url(p):
-    sn = p["street_name"].lower().replace(" ", "-")
-    sub = p["suburb"].lower().replace(" ", "-")
-    return f"https://www.domain.com.au/building-profile/{p['street_num']}-{sn}-{sub}-{p['state'].lower()}-{p['postcode']}/"
-
-# ── Core scraper: Domain property profile for a single unit ───────────────────
-def scrape_domain_unit(unit, street_num, street_name, suburb, state, postcode):
-    """Fetch Domain property profile for one specific unit. Returns dict or None."""
-    slug = domain_unit_slug(unit, street_num, street_name, suburb, state, postcode)
-    url = f"https://www.domain.com.au/property-profile/{slug}"
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=10, allow_redirects=True)
-        if r.status_code != 200:
-            return None
-        text = r.text
-        # Domain embeds estimate in page as text: "estimated to be worth around $Xk"
-        est_m = re.search(r"estimated to be worth around \$([\d,]+\.?\d*[km]?)", text, re.I)
-        range_m = re.search(r"range from \$([\d,]+\.?\d*[km]?) to \$([\d,]+\.?\d*[km]?)", text, re.I)
-        beds_m = re.search(r"(\d+)\s+bedroom", text, re.I)
-        sold_m = re.search(r"last sold[^\$]*\$([\d,]+\.?\d*[km]?)", text, re.I)
-        sold_date_m = re.search(r"last sold (\d+ years? ago|\w+ \d{4})", text, re.I)
-
-        def parse_val(s):
-            if not s: return None
-            s = s.replace(",", "")
-            if s.endswith("m"): return int(float(s[:-1]) * 1_000_000)
-            if s.endswith("k"): return int(float(s[:-1]) * 1_000)
-            return int(float(s))
-
-        est_val = parse_val(est_m.group(1)) if est_m else None
-        lo_val  = parse_val(range_m.group(1)) if range_m else None
-        hi_val  = parse_val(range_m.group(2)) if range_m else None
-        sold_val = parse_val(sold_m.group(1)) if sold_m else None
-
-        if est_val:
-            return {
-                "unit": unit, "url": url,
-                "estimate": est_val, "low": lo_val, "high": hi_val,
-                "beds": int(beds_m.group(1)) if beds_m else None,
-                "last_sold": sold_val,
-                "last_sold_when": sold_date_m.group(1) if sold_date_m else None,
-            }
-        if sold_val:
-            return {"unit": unit, "url": url, "estimate": None,
-                    "last_sold": sold_val, "last_sold_when": sold_date_m.group(1) if sold_date_m else None,
-                    "beds": int(beds_m.group(1)) if beds_m else None, "low": None, "high": None}
-    except Exception:
-        pass
-    return None
-
-# ── Main estimation logic ──────────────────────────────────────────────────────
-def get_estimate(address):
+def build_links(address: str) -> dict:
     p = parse_address(address)
-    unit = p["unit"]
-    street_num = p["street_num"]
-    street_name = p["street_name"]
-    suburb = p["suburb"]
+    sub = p["suburb"]
     state = p["state"]
-    postcode = p["postcode"]
+    pc = p["postcode"]
+    unit = p["unit"]
+    snum = p["street_num"]
+    sname = p["street_name"]
+    full = p["full"]
 
-    results = {"target": None, "siblings": [], "errors": []}
+    # Slugs
+    sname_slug = sname.lower().replace(" ", "-")
+    sub_slug = sub.lower().replace(" ", "-")
+    state_l = state.lower()
 
-    # 1. Try the exact unit first
+    # Domain property profile slug:  4-40-rothesay-avenue-elwood-vic-3184
     if unit:
-        data = scrape_domain_unit(unit, street_num, street_name, suburb, state, postcode)
-        if data and (data.get("estimate") or data.get("last_sold")):
-            results["target"] = data
-        time.sleep(0.4)
+        domain_prop_slug = f"{unit}-{snum}-{sname_slug}-{sub_slug}-{state_l}-{pc}"
+    else:
+        domain_prop_slug = f"{snum}-{sname_slug}-{sub_slug}-{state_l}-{pc}"
 
-    # 2. Try sibling units (1–6) to build comparable data and fill gaps
-    for u in [str(i) for i in range(1, 7) if str(i) != unit]:
-        sib = scrape_domain_unit(u, street_num, street_name, suburb, state, postcode)
-        if sib and (sib.get("estimate") or sib.get("last_sold")):
-            results["siblings"].append(sib)
-        time.sleep(0.3)
-        if len(results["siblings"]) >= 4:
-            break
+    # Domain building profile: 40-rothesay-avenue-elwood-vic-3184
+    domain_bldg_slug = f"{snum}-{sname_slug}-{sub_slug}-{state_l}-{pc}"
 
-    return results, p
+    # Domain street profile
+    domain_street_slug = f"{sname_slug}-{sub_slug}-{state_l}-{pc}"
 
-def format_dollars(val):
-    if val is None: return None
-    if val >= 1_000_000: return f"${val/1_000_000:.2f}m".rstrip("0").rstrip(".")+"m" if val % 1_000_000 else f"${val//1_000_000:,}m"
-    return f"${val:,}"
+    # REA sold slug: elwood-vic-3184
+    rea_suburb_slug = "-".join(x for x in [sub_slug, state_l, pc] if x)
 
-# ── Address autocomplete ───────────────────────────────────────────────────────
-def fetch_suggestions(query):
-    if len(query) < 4: return []
-    clean = re.sub(r"^\d+\s*/\s*", "", query.strip())
-    clean = re.sub(r"^(unit|apt|apartment|flat|shop)\s+\S+\s*,?\s*", "", clean, flags=re.IGNORECASE)
-    q = clean or query
-    for url, params in [
-        ("https://nominatim.openstreetmap.org/search",
-         {"q": q, "format": "json", "addressdetails": 1, "limit": 7, "countrycodes": "au"}),
-        ("https://photon.komoot.io/api/",
-         {"q": q, "limit": 7, "lang": "en", "bbox": "112,-44,154,-10"}),
-    ]:
-        try:
+    # Encoded strings
+    q_full = urllib.parse.quote_plus(full)
+    q_suburb = urllib.parse.quote_plus(f"{sub} {state} {pc}".strip())
+    q_street = urllib.parse.quote_plus(f"{snum} {sname}, {sub} {state}".strip())
+
+    return {
+        "p": p,
+        "property": {
+            "domain_profile":  f"https://www.domain.com.au/property-profile/{domain_prop_slug}",
+            "domain_building": f"https://www.domain.com.au/building-profile/{domain_bldg_slug}/",
+            "domain_street":   f"https://www.domain.com.au/street-profile/{domain_street_slug}/",
+            "rea_profile":     f"https://www.realestate.com.au/property/{domain_prop_slug}/",
+        },
+        "sold": {
+            "domain_sold":     f"https://www.domain.com.au/sold-listings/?q={q_suburb}&sort=dateSold-desc",
+            "rea_sold":        f"https://www.realestate.com.au/sold/in-{rea_suburb_slug}/",
+            "auhouseprices":   f"https://www.auhouseprices.com/sold/list/{state}/{urllib.parse.quote(sub)}/",
+            "allhomes":        f"https://www.allhomes.com.au/sale/{sub_slug}-{state_l}-{pc}/sold/",
+        },
+        "estimate": {
+            "propvalue":       f"https://www.propertyvalue.com.au/search/?q={q_full}",
+            "domain_search":   f"https://www.domain.com.au/sale/?q={q_suburb}",
+            "rea_estimate":    f"https://www.realestate.com.au/neighbourhoods/{sub_slug}-{state_l}-{pc}/",
+            "realestate_sold": f"https://www.realestate.com.au/sold/in-{rea_suburb_slug}/?sortType=soldDate",
+        },
+        "suburb": {
+            "domain_suburb":   f"https://www.domain.com.au/suburb-profile/{sub_slug}-{state_l}-{pc}/",
+            "rea_suburb":      f"https://www.realestate.com.au/neighbourhoods/{sub_slug}-{state_l}-{pc}/",
+            "sqm_research":    f"https://sqmresearch.com.au/property-vacancy-rate.php?postcode={pc}",
+            "abs":             f"https://www.abs.gov.au/census/find-census-data/quickstats/2021/{pc}",
+        },
+    }
+
+
+def fetch_suggestions(query: str) -> list:
+    try:
+        import requests
+        clean = re.sub(r"^\d+\s*/\s*", "", query.strip())
+        clean = re.sub(r"^(unit|apt|apartment|flat)\s+\S+\s*,?\s*", "", clean, flags=re.I)
+        q = clean or query
+        for url, params in [
+            ("https://nominatim.openstreetmap.org/search",
+             {"q": q, "format": "json", "addressdetails": 1, "limit": 7, "countrycodes": "au"}),
+            ("https://photon.komoot.io/api/",
+             {"q": q, "limit": 7, "lang": "en", "bbox": "112,-44,154,-10"}),
+        ]:
             r = requests.get(url, params=params, headers={"User-Agent": "AusPropertyValuator/1.0"}, timeout=5)
             if r.status_code != 200: continue
             data = r.json()
             items = data if isinstance(data, list) else data.get("features", [])
             out, seen = [], set()
             for item in items:
-                if isinstance(item, dict) and "display_name" in item:
+                if "display_name" in item:
                     parts = [x.strip() for x in item["display_name"].split(",") if x.strip().lower() != "australia"]
                     label = ", ".join(parts[:5])
-                elif isinstance(item, dict) and "properties" in item:
+                elif "properties" in item:
                     pp = item["properties"]
                     if pp.get("country","").lower() not in ("australia","au"): continue
                     label = ", ".join(x for x in [pp.get("housenumber",""), pp.get("street",""),
@@ -208,178 +190,171 @@ def fetch_suggestions(query):
                 if label and label not in seen:
                     seen.add(label); out.append(label)
             if out: return out
-        except Exception:
-            pass
+    except Exception:
+        pass
     return []
 
 # ── Session state ──────────────────────────────────────────────────────────────
-for k, v in [("confirmed_address",""), ("last_typed",""), ("suggestions",[])]:
+for k, v in [("confirmed",""), ("last_typed",""), ("suggestions",[]), ("searched","")]:
     if k not in st.session_state: st.session_state[k] = v
 
-# ── UI ─────────────────────────────────────────────────────────────────────────
-st.markdown('<p style="font-size:.8rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#374151;margin-bottom:.4rem">Property address</p>', unsafe_allow_html=True)
-
-typed = st.text_input("addr", value=st.session_state.confirmed_address or "",
+# ── Search box ─────────────────────────────────────────────────────────────────
+typed = st.text_input("addr", value=st.session_state.confirmed or "",
                       placeholder="e.g. 4/40 Rothesay Avenue, Elwood VIC 3184",
                       label_visibility="collapsed")
 
-if typed and typed != st.session_state.confirmed_address and typed != st.session_state.last_typed:
+if typed and typed != st.session_state.confirmed and typed != st.session_state.last_typed:
     st.session_state.last_typed = typed
-    st.session_state.confirmed_address = ""
+    st.session_state.confirmed = ""
+    st.session_state.searched = ""
     if len(typed) >= 4:
-        with st.spinner("Searching addresses..."):
+        with st.spinner("Finding address..."):
             st.session_state.suggestions = fetch_suggestions(typed)
     else:
         st.session_state.suggestions = []
 
-if st.session_state.suggestions and not st.session_state.confirmed_address:
+if st.session_state.suggestions and not st.session_state.confirmed:
     st.caption("Select your address:")
     for s in st.session_state.suggestions:
         if st.button(f"📍 {s}", key=f"s_{hash(s)}", use_container_width=True):
-            st.session_state.confirmed_address = s
+            st.session_state.confirmed = s
             st.session_state.suggestions = []
             st.rerun()
 
-final_address = st.session_state.confirmed_address or typed
-if st.session_state.confirmed_address:
-    st.success(f"Selected: {st.session_state.confirmed_address}")
+final = st.session_state.confirmed or typed
+if st.session_state.confirmed:
+    st.success(f"📍 {st.session_state.confirmed}")
 
-st.markdown("")
-go = st.button("🔍  Get market valuation", use_container_width=True, type="primary")
+col1, col2 = st.columns([3, 1])
+with col1:
+    go = st.button("🔍  Research this property", use_container_width=True, type="primary")
+with col2:
+    clear = st.button("Clear", use_container_width=True)
+    if clear:
+        for k in ["confirmed","last_typed","suggestions","searched"]:
+            st.session_state[k] = "" if k != "suggestions" else []
+        st.rerun()
 
-if go:
-    address = final_address.strip()
-    if len(address) < 6:
-        st.warning("Please enter a valid Australian property address.")
+if go and len(final.strip()) > 5:
+    st.session_state.searched = final.strip()
+
+# ── Results ────────────────────────────────────────────────────────────────────
+if st.session_state.searched:
+    address = st.session_state.searched
+    links = build_links(address)
+    p = links["p"]
+
+    # Address card
+    unit_str = f"Unit {p['unit']}, " if p["unit"] else ""
+    st.markdown(f"""
+    <div class="address-card">
+      <div class="address-display">{unit_str}{p['street_num']} {p['street_name']}</div>
+      <p class="address-sub">{p['suburb']} {p['state']} {p['postcode']} &nbsp;&middot;&nbsp; Click any link below to open in that platform</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Property profile ───────────────────────────────────────────────────────
+    st.markdown('<div class="section-title">Property profile &amp; estimates</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="link-grid">
+      <a class="link-card featured" href="{links['property']['domain_profile']}" target="_blank">
+        <div class="link-card-logo">Domain</div>
+        <div class="link-card-title">Property Profile</div>
+        <div class="link-card-desc">Domain Estimate, sale history &amp; property details for this specific address</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+      <a class="link-card featured" href="{links['estimate']['propvalue']}" target="_blank">
+        <div class="link-card-logo">PropertyValue.com.au</div>
+        <div class="link-card-title">Free AVM Estimate</div>
+        <div class="link-card-desc">Automated valuation — no account needed. Search for this address.</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+    </div>
+    <div class="link-grid">
+      <a class="link-card" href="{links['property']['domain_building']}" target="_blank">
+        <div class="link-card-logo">Domain</div>
+        <div class="link-card-title">Building Profile</div>
+        <div class="link-card-desc">All units at {p['street_num']} {p['street_name']} with individual estimates</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+      <a class="link-card" href="{links['property']['rea_profile']}" target="_blank">
+        <div class="link-card-logo">realestate.com.au</div>
+        <div class="link-card-title">PropTrack Estimate</div>
+        <div class="link-card-desc">REA's automated valuation and property history</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Recent sales ───────────────────────────────────────────────────────────
+    st.markdown('<div class="section-title">Recent sold prices</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="link-grid">
+      <a class="link-card" href="{links['sold']['domain_sold']}" target="_blank">
+        <div class="link-card-logo">Domain</div>
+        <div class="link-card-title">Sold Listings</div>
+        <div class="link-card-desc">Recent sales in {p['suburb']} sorted by date</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+      <a class="link-card" href="{links['sold']['rea_sold']}" target="_blank">
+        <div class="link-card-logo">realestate.com.au</div>
+        <div class="link-card-title">Sold Prices</div>
+        <div class="link-card-desc">Recent sales history in {p['suburb']}</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+      <a class="link-card" href="{links['sold']['auhouseprices']}" target="_blank">
+        <div class="link-card-logo">AuHousePrices.com</div>
+        <div class="link-card-title">Sold Price History</div>
+        <div class="link-card-desc">Free sold price database — no account needed</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+      <a class="link-card" href="{links['property']['domain_street']}" target="_blank">
+        <div class="link-card-logo">Domain</div>
+        <div class="link-card-title">Street Profile</div>
+        <div class="link-card-desc">All sales on {p['street_name']} over time</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Suburb data ────────────────────────────────────────────────────────────
+    st.markdown('<div class="section-title">Suburb market data</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="link-grid">
+      <a class="link-card" href="{links['suburb']['domain_suburb']}" target="_blank">
+        <div class="link-card-logo">Domain</div>
+        <div class="link-card-title">{p['suburb']} Suburb Profile</div>
+        <div class="link-card-desc">Median prices, days on market, auction clearance rates</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+      <a class="link-card" href="{links['suburb']['rea_suburb']}" target="_blank">
+        <div class="link-card-logo">realestate.com.au</div>
+        <div class="link-card-title">{p['suburb']} Neighbourhood</div>
+        <div class="link-card-desc">PropTrack suburb insights and price trends</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+      <a class="link-card" href="{links['suburb']['sqm_research']}" target="_blank">
+        <div class="link-card-logo">SQM Research</div>
+        <div class="link-card-title">Vacancy &amp; Supply Data</div>
+        <div class="link-card-desc">Independent market research for postcode {p['postcode']}</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+      <a class="link-card" href="{links['suburb']['abs']}" target="_blank">
+        <div class="link-card-logo">ABS Census</div>
+        <div class="link-card-title">Demographic Data</div>
+        <div class="link-card-desc">Income, ownership rates &amp; household stats for {p['postcode']}</div>
+        <div class="link-card-arrow">&#8599;</div>
+      </a>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Tip box ────────────────────────────────────────────────────────────────
+    tip = ""
+    if p["unit"]:
+        tip = f"<strong>Tip for unit {p['unit']}/{p['street_num']}:</strong> If the property profile shows no estimate, try the <strong>Building Profile</strong> link — it lists all units in the block ({p['street_num']} {p['street_name']}) with individual Domain Estimates, including units that may not have their own profile page."
     else:
-        with st.spinner(f"Checking Domain property profiles for {address} and nearby units..."):
-            results, p = get_estimate(address)
+        tip = f"<strong>Tip:</strong> The Domain Property Profile is the best starting point — it shows the Domain Estimate, full sale history, and links to comparable recent sales nearby."
 
-        target = results["target"]
-        siblings = results["siblings"]
+    st.markdown(f'<div class="info-box">{tip}</div>', unsafe_allow_html=True)
 
-        st.markdown(
-            f'<div class="val-card">'
-            f'<div class="val-address">Market estimate for</div>'
-            f'<div class="val-headline">{address}</div>',
-            unsafe_allow_html=True,
-        )
-
-        # ── Target unit result ────────────────────────────────────────────────
-        if target and target.get("estimate"):
-            lo = format_dollars(target.get("low"))
-            hi = format_dollars(target.get("high"))
-            st.markdown('<div class="section-head">Domain estimate — this property</div>', unsafe_allow_html=True)
-            st.markdown(
-                f'<div class="est-row"><div class="est-logo">Domain<br/>Estimate</div>'
-                f'<div class="est-body">'
-                f'<div class="est-value">{format_dollars(target["estimate"])}</div>'
-                + (f'<div class="est-range">Range: {lo} &ndash; {hi}</div>' if lo and hi else "")
-                + (f'<div class="est-note">Last sold: {format_dollars(target["last_sold"])}'
-                   + (f' ({target["last_sold_when"]})' if target.get("last_sold_when") else "") + '</div>'
-                   if target.get("last_sold") else "")
-                + f'<a class="est-link" href="{target["url"]}" target="_blank">View on Domain</a>'
-                f'</div></div>',
-                unsafe_allow_html=True,
-            )
-
-        elif target and target.get("last_sold"):
-            st.markdown('<div class="section-head">This property — last known sale</div>', unsafe_allow_html=True)
-            st.markdown(
-                f'<div class="est-row"><div class="est-logo">Domain<br/>Last Sale</div>'
-                f'<div class="est-body">'
-                f'<div class="est-value">{format_dollars(target["last_sold"])}</div>'
-                + (f'<div class="est-range">{target["last_sold_when"]}</div>' if target.get("last_sold_when") else "")
-                + '<div class="est-note">No current Domain Estimate available for this unit — using comparable units below.</div>'
-                + f'<a class="est-link" href="{target["url"]}" target="_blank">View on Domain</a>'
-                f'</div></div>',
-                unsafe_allow_html=True,
-            )
-
-        # ── Estimate from siblings if no target estimate ───────────────────────
-        sib_estimates = [s["estimate"] for s in siblings if s.get("estimate")]
-        if not (target and target.get("estimate")) and sib_estimates:
-            # Weight by bed count similarity
-            avg = sum(sib_estimates) // len(sib_estimates)
-            lo_sib = min(sib_estimates)
-            hi_sib = max(sib_estimates)
-            st.markdown('<div class="section-head">Estimated value — derived from same building</div>', unsafe_allow_html=True)
-            st.markdown(
-                f'<div class="est-row"><div class="est-logo">Building<br/>Average</div>'
-                f'<div class="est-body">'
-                f'<div class="est-value">{format_dollars(avg)}</div>'
-                f'<div class="est-range">Range of units in building: {format_dollars(lo_sib)} &ndash; {format_dollars(hi_sib)}</div>'
-                f'<div class="est-note">Domain has no estimate for unit {p["unit"]} directly. '
-                f'This is the average of {len(sib_estimates)} other units at {p["street_num"]} {p["street_name"]} with active estimates.</div>'
-                f'</div></div>',
-                unsafe_allow_html=True,
-            )
-
-        # ── Comparable units in the building ─────────────────────────────────
-        if siblings:
-            st.markdown('<div class="section-head">Other units in the same building (Domain)</div>', unsafe_allow_html=True)
-            for s in siblings:
-                beds_str = f'{s["beds"]}br ' if s.get("beds") else ""
-                sold_str = (f' &bull; Last sold {format_dollars(s["last_sold"])}'
-                           + (f' ({s["last_sold_when"]})' if s.get("last_sold_when") else "")
-                           if s.get("last_sold") else "")
-                est_str = format_dollars(s["estimate"]) if s.get("estimate") else "No estimate"
-                lo = format_dollars(s.get("low"))
-                hi = format_dollars(s.get("high"))
-                st.markdown(
-                    f'<div class="est-row"><div class="est-logo">Unit {s["unit"]}<br/>{beds_str}</div>'
-                    f'<div class="est-body">'
-                    f'<div class="est-value">{est_str}</div>'
-                    + (f'<div class="est-range">Range: {lo} &ndash; {hi}</div>' if lo and hi else "")
-                    + (f'<div class="est-range">{sold_str.replace(" &bull; ","")}</div>' if sold_str else "")
-                    + f'<a class="est-link" href="{s["url"]}" target="_blank">View unit {s["unit"]} on Domain</a>'
-                    f'</div></div>',
-                    unsafe_allow_html=True,
-                )
-
-        if not target and not siblings:
-            st.info(
-                f"Domain has no property profile for this address or its neighbouring units. "
-                f"Try the direct links below — the building profile and street profile on Domain may have the data.",
-                icon="ℹ️"
-            )
-
-        # ── Always-show direct links ───────────────────────────────────────────
-        unit = p["unit"]
-        sn = p["street_name"].lower().replace(" ","-")
-        sub = p["suburb"].lower().replace(" ","-")
-        state_l = p["state"].lower()
-        pc = p["postcode"]
-        snum = p["street_num"]
-        q = urllib.parse.quote_plus(p["suburb_state"])
-
-        st.markdown('<div class="section-head">Research further</div>', unsafe_allow_html=True)
-        links = [
-            ("Domain building profile", domain_building_url(p),
-             f"All units at {snum} {p['street_name']} with estimates"),
-            ("Domain street profile", f"https://www.domain.com.au/street-profile/rothesay-avenue-{sub}-{state_l}-{pc}/",
-             "Recent sales on the same street"),
-            ("Domain sold listings", f"https://www.domain.com.au/sold-listings/?q={q}&sort=dateSold-desc",
-             f"Recent sales in {p['suburb']}"),
-            ("AuHousePrices.com", f"https://www.auhouseprices.com/sold/list/{p['state']}/{urllib.parse.quote(p['suburb'])}/",
-             "Free sold price history — no login needed"),
-            ("PropertyValue.com.au", f"https://www.propertyvalue.com.au/search/?q={urllib.parse.quote_plus(address)}",
-             "Another free automated estimate"),
-        ]
-        for label, url, note in links:
-            st.markdown(
-                f'<div class="est-row"><div class="est-logo">{label.split(".")[0].split(" ")[0]}</div>'
-                f'<div class="est-body"><div class="est-note">{note}</div>'
-                f'<a class="est-link" href="{url}" target="_blank">Open {label}</a>'
-                f'</div></div>',
-                unsafe_allow_html=True,
-            )
-
-        st.markdown(
-            f'<div class="disclaimer">Retrieved {datetime.now().strftime("%-d %B %Y, %-I:%M %p AEST")}. '
-            f'Estimates sourced from Domain.com.au property profiles. Indicative only — not a certified valuation. '
-            f'Engage a licensed valuer (API/AIQS member) for formal advice.</div></div>',
-            unsafe_allow_html=True,
-        )
-
-st.markdown('<div class="footer">Built with Streamlit &middot; Data via Domain.com.au &middot; 100% free</div>', unsafe_allow_html=True)
+st.markdown('<div class="footer">Built with Streamlit &middot; Links to Domain, REA, PropertyValue &amp; more &middot; Free to use</div>', unsafe_allow_html=True)
