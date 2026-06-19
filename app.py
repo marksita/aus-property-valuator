@@ -71,8 +71,84 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# ── Domain property profile scraper ───────────────────────────────────────────
+def fetch_domain_estimate(url: str) -> dict | None:
+    """
+    Fetch a Domain property profile page and extract the estimate.
+    Works because Domain property profiles are publicly accessible HTML.
+    Parses the text patterns Domain uses on the page.
+    """
+    try:
+        r = requests.get(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
+            "Accept-Language": "en-AU,en;q=0.9",
+        }, timeout=12, allow_redirects=True)
+
+        if r.status_code != 200:
+            return None
+
+        text = r.text
+
+        def to_int(s: str) -> int | None:
+            s = s.replace(",", "").replace("$", "").strip().rstrip(".")
+            try:
+                if s.lower().endswith("m"): return int(float(s[:-1]) * 1_000_000)
+                if s.lower().endswith("k"): return int(float(s[:-1]) * 1_000)
+                return int(float(s))
+            except Exception:
+                return None
+
+        # Domain embeds: "estimated to be worth around $2.33m"
+        mid_m  = re.search(r"estimated to be worth around \$([0-9.,kmKM]+)", text, re.I)
+        # "range from $2.01m to $2.65m"
+        rang_m = re.search(r"range from \$([0-9.,kmKM]+) to \$([0-9.,kmKM]+)", text, re.I)
+        # Property type
+        type_m = re.search(r"is (?:an? )?(House|Unit|Apartment|Townhouse|Villa)", text, re.I)
+        # Beds/baths
+        beds_m = re.search(r"(\d+)\s+[Bb]ed", text)
+        bath_m = re.search(r"(\d+)\s+[Bb]ath", text)
+        # Last sold
+        sold_m = re.search(r"last sold[^$\n]*\$([0-9.,kmKM]+)", text, re.I)
+        when_m = re.search(r"last sold (\d+ years? ago|\w+ \d{4})", text, re.I)
+        # Confidence
+        conf_m = re.search(r"(Low|Medium|High) confidence", text, re.I)
+        # Rental estimate
+        rent_m = re.search(r"\$([0-9,]+)\+?.*?[Rr]ental yield", text)
+
+        mid  = to_int(mid_m.group(1))  if mid_m  else None
+        lo   = to_int(rang_m.group(1)) if rang_m else None
+        hi   = to_int(rang_m.group(2)) if rang_m else None
+        sold = to_int(sold_m.group(1)) if sold_m else None
+
+        if mid:
+            return {
+                "mid": mid, "low": lo, "high": hi,
+                "prop_type": type_m.group(1).title() if type_m else None,
+                "beds": int(beds_m.group(1)) if beds_m else None,
+                "baths": int(bath_m.group(1)) if bath_m else None,
+                "last_sold": sold,
+                "last_sold_when": when_m.group(1) if when_m else None,
+                "confidence": conf_m.group(1).lower() if conf_m else "medium",
+                "source": "Domain Estimate",
+                "url": url,
+            }
+    except Exception:
+        pass
+    return None
+
+
+def domain_profile_url(p: dict) -> str:
+    sn    = p["street_name"].lower().replace(" ", "-")
+    sub   = p["suburb"].lower().replace(" ", "-")
+    state = p["state"].lower()
+    pc    = p["postcode"]
+    if p["unit"]:
+        return f"https://www.domain.com.au/property-profile/{p['unit']}-{p['street_num']}-{sn}-{sub}-{state}-{pc}"
+    return f"https://www.domain.com.au/property-profile/{p['street_num']}-{sn}-{sub}-{state}-{pc}"
+
+
 # ── Suburb median data (fetched from free public APIs) ─────────────────────────
-# Domain suburb profile JSON endpoint — publicly accessible, no auth needed
 def fetch_suburb_medians(suburb: str, state: str, postcode: str) -> dict:
     """
     Fetch unit and house medians for a suburb from Domain's public suburb profile.
@@ -179,36 +255,54 @@ def fmt(val: int) -> str:
 # ── Core valuation logic ───────────────────────────────────────────────────────
 def estimate(address: str) -> dict:
     p = parse_address(address)
+    domain_url = domain_profile_url(p)
     medians = fetch_suburb_medians(p["suburb"], p["state"], p["postcode"])
 
-    prop_type = "unit" if p["is_unit"] else "house"
-    base = medians["unit_median"] if prop_type == "unit" else medians["house_median"]
+    # ── Step 1: Try fetching directly from Domain property profile ─────────────
+    domain = fetch_domain_estimate(domain_url)
+    if domain and domain.get("mid"):
+        prop_type = domain.get("prop_type", "house").lower() if domain.get("prop_type") else ("unit" if p["is_unit"] else "house")
+        beds_str  = f"{domain['beds']}br " if domain.get("beds") else ""
+        baths_str = f"{domain['baths']}ba " if domain.get("baths") else ""
+        sold_str  = ""
+        if domain.get("last_sold"):
+            sold_str = f" · Last sold {fmt(domain['last_sold'])}"
+            if domain.get("last_sold_when"):
+                sold_str += f" ({domain['last_sold_when']})"
+        basis = f"Domain Estimate · {beds_str}{baths_str}{prop_type.title()}{sold_str}"
+        return {
+            "value": domain["mid"],
+            "low":   domain.get("low")  or int(domain["mid"] * 0.87),
+            "high":  domain.get("high") or int(domain["mid"] * 1.13),
+            "basis": basis,
+            "confidence": domain.get("confidence", "medium"),
+            "prop_type": prop_type,
+            "suburb_median": medians["unit_median"] if p["is_unit"] else medians["house_median"],
+            "domain_data": domain,
+            "parsed": p,
+            "medians": medians,
+            "source": "domain",
+        }
 
-    # Bed-count adjustment (default 2br for units, 3br for houses)
-    # Without bed info, apply small adjustments around the median
-    bed_adj = {
-        "unit":  {1: 0.80, 2: 1.00, 3: 1.30},
-        "house": {2: 0.75, 3: 1.00, 4: 1.25, 5: 1.45},
-    }
-    # We don't know beds yet — use 1.0 (median)
-    adj = 1.0
-    value = int(base * adj)
+    # ── Step 2: Fall back to suburb median ─────────────────────────────────────
+    prop_type = "unit" if p["is_unit"] else "house"
+    base  = medians["unit_median"] if prop_type == "unit" else medians["house_median"]
+    value = base
     low   = int(value * 0.87)
     high  = int(value * 1.13)
-
     basis = (
         f"Based on {p['suburb']} {prop_type} median ({fmt(base)}) "
         f"from {medians['source']} — {medians['growth']:.2f}% annual growth"
     )
-    confidence = "medium"
-
     return {
         "value": value, "low": low, "high": high,
-        "basis": basis, "confidence": confidence,
+        "basis": basis, "confidence": "low",
         "prop_type": prop_type,
         "suburb_median": base,
+        "domain_data": None,
         "parsed": p,
         "medians": medians,
+        "source": "suburb_median",
     }
 
 
@@ -323,7 +417,7 @@ if st.session_state.searched:
     address = st.session_state.searched
 
     if st.session_state.result is None:
-        with st.spinner("Calculating estimate..."):
+        with st.spinner("Fetching Domain estimate..."):
             st.session_state.result = estimate(address)
 
     res  = st.session_state.result
@@ -331,15 +425,16 @@ if st.session_state.searched:
     links = build_links(p)
 
     conf_icon  = {"high":"🟢","medium":"🟡","low":"🔴"}
-    conf_label = {"high":"High confidence","medium":"Medium confidence — suburb median","low":"Low confidence"}
+    conf_label = {"high":"High confidence","medium":"Medium confidence","low":"Low confidence — suburb median fallback"}
+    source_label = "Domain Estimate" if res.get("source") == "domain" else "Suburb Median Estimate"
 
     # ── Estimate banner ────────────────────────────────────────────────────────
     st.markdown(f"""
     <div class="estimate-banner">
-      <div class="eb-label">Estimated market value</div>
+      <div class="eb-label">{source_label}</div>
       <div class="eb-address">{address}</div>
       <div class="eb-value">{fmt(res['value'])}</div>
-      <div class="eb-range">Indicative range: {fmt(res['low'])} – {fmt(res['high'])}</div>
+      <div class="eb-range">Range: {fmt(res['low'])} – {fmt(res['high'])}</div>
       <div class="eb-basis">{res['basis']}</div>
       <div class="conf-chip">{conf_icon[res['confidence']]} {conf_label[res['confidence']]}</div>
     </div>
